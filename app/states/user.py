@@ -13,5 +13,7 @@ class SettingsStates(StatesGroup):
 
 class NavigationStates(StatesGroup):
     """Состояния для навигации по меню."""
+    viewing_profile = State()
     viewing_matches = State()
     viewing_heroes = State()
+    viewing_match = State()

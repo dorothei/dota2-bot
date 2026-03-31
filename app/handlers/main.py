@@ -1,11 +1,11 @@
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import InputMediaPhoto, Message
 from aiogram.utils.formatting import Bold, Text
 
 from app.database.db import db
-from app.keyboards.user import main_menu
+from app.keyboards.user import main_menu, match_menu, player_menu
 from app.services.opendota import opendota_client
 from app.states.user import RegistrationStates, SettingsStates
 from app.utils.formatters import format_match_details
@@ -21,7 +21,6 @@ router = Router()
 
 @router.message(Command("match"))
 async def handle_match_command(message: Message) -> None:
-    """Обработчик команды /match <match_id>."""
     match_id = message.text.split()[1] if len(message.text.split()) > 1 else None
 
     if not match_id:
@@ -40,11 +39,9 @@ async def handle_match_command(message: Message) -> None:
         )
         return
 
-    # Отправляем сообщение о загрузке
     loading_msg = await message.answer("🔄 Загружаю информацию о матче...")
 
     try:
-        # Получаем данные матча через OpenDota API
         match_url = f"https://api.opendota.com/api/matches/{match_id_int}"
 
         session = await opendota_client.get_session()
@@ -62,7 +59,7 @@ async def handle_match_command(message: Message) -> None:
                     else str(match_text)
                 )
 
-                await loading_msg.edit_text(match_html, parse_mode="HTML")
+                await loading_msg.edit_text(match_html, parse_mode="HTML", reply_markup=match_menu(str(match_id_int)))
 
             elif response.status == 404:
                 await loading_msg.edit_text(
@@ -83,7 +80,6 @@ async def handle_match_command(message: Message) -> None:
 
 @router.message(Command("player"))
 async def handle_player_command(message: Message) -> None:
-    """Обработчик команды /player <account_id>."""
     account_id = message.text.split()[1] if len(message.text.split()) > 1 else None
 
     if not account_id:
@@ -96,7 +92,6 @@ async def handle_player_command(message: Message) -> None:
         )
         return
 
-    # Валидация ID
     if not validate_steam_id(account_id):
         await message.answer(
             "❌ Неверный формат ID аккаунта.\n\n"
@@ -107,7 +102,6 @@ async def handle_player_command(message: Message) -> None:
         )
         return
 
-    # Конвертируем ID64 в ID32 при необходимости
     if len(account_id) >= 17:
         try:
             account_id = steam64_to_steam32(account_id)
@@ -118,25 +112,36 @@ async def handle_player_command(message: Message) -> None:
             )
             return
 
-    # Отправляем сообщение о загрузке
     loading_msg = await message.answer("🔄 Загружаю статистику игрока...")
 
     try:
-        # Получаем статистику игрока
-        stats_text = await opendota_client.get_formatted_player_stats(account_id)
+        stats_data = await opendota_client.get_formatted_player_stats(account_id)
 
-        if "❌" in str(stats_text) or "🚷" in str(stats_text):
-            # Если есть ошибка в статистике
-            await loading_msg.edit_text(str(stats_text))
+        await loading_msg.delete()
+
+        if "❌" in str(stats_data["text"]) or "🚷" in str(stats_data["text"]):
+            await message.answer(str(stats_data["text"]))
         else:
             full_text = Text(
                 Bold("📊 Статистика игрока"),
                 "\n",
                 f"🆔 Steam ID32: {account_id}\n\n",
-                stats_text,
+                stats_data["text"],
             )
 
-            await loading_msg.edit_text(full_text.as_html(), parse_mode="HTML")
+            if stats_data["avatar_url"]:
+                await message.answer_photo(
+                    photo=stats_data["avatar_url"],
+                    caption=full_text.as_html(),
+                    parse_mode="HTML",
+                    reply_markup=player_menu(account_id)
+                )
+            else:
+                await message.answer(
+                    full_text.as_html(), 
+                    parse_mode="HTML",
+                    reply_markup=player_menu(account_id)
+                )
 
     except Exception as e:
         logger.error(f"Ошибка получения статистики игрока {account_id}: {e}")
@@ -147,7 +152,6 @@ async def handle_player_command(message: Message) -> None:
 
 @router.message(Command("help"))
 async def handle_help_command(message: Message) -> None:
-    """Обработчик команды /help."""
     help_text = (
         "📖 <b>Справка по боту</b>\n\n"
         "🎮 <b>Основные команды:</b>\n"
@@ -167,7 +171,6 @@ async def handle_help_command(message: Message) -> None:
 
 @router.message(CommandStart())
 async def handle_start(message: Message, state: FSMContext) -> None:
-    """Обработчик команды /start."""
     tg_id = message.from_user.id
 
     try:

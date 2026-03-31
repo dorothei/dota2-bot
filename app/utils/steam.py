@@ -8,7 +8,6 @@ STEAM_ID64_BASE: Final[int] = 76561197960265728
 
 
 def extract_steam_id_from_url(url: str) -> str | None:
-    """Извлекает Steam ID64 из URL профиля."""
     # Прямая ссылка с ID64
     match = re.search(r'steamcommunity\.com/profiles/(\d+)', url)
     if match:
@@ -21,7 +20,7 @@ def extract_steam_id_from_url(url: str) -> str | None:
     return None
 
 def steam64_to_steam32(steam_id64: str) -> str:
-    """Конвертирует Steam ID64 в Steam ID32."""
+
     try:
         steam_id64_int = int(steam_id64)
         steam_id32 = steam_id64_int - STEAM_ID64_BASE
