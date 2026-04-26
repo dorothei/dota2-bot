@@ -9,6 +9,7 @@ from app.keyboards.user import (
     confirm_action,
     match_menu,
     matches_navigation,
+    match_menu,
     player_menu,
     settings_menu,
 )
@@ -23,42 +24,15 @@ router = Router()
 
 async def safe_edit_text(message, text, parse_mode="HTML", reply_markup=None):
     try:
-        if getattr(message, "photo", None):
-            await message.edit_caption(
-                caption=text, parse_mode=parse_mode, reply_markup=reply_markup
-            )
-        else:
-            await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except TelegramBadRequest as e:
-        error_text = str(e).lower()
-        if "message is not modified" in error_text:
-            return
-        # Если не можем редактировать, отправляем новое сообщение
-        if any(
-            needle in error_text
-            for needle in [
-                "there is no text in the message to edit",
-                "message to edit not found",
-                "message can't be edited",
-                "message is not modified",
-            ]
-        ):
-            await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        if "message is not modified" in str(e).lower():
             return
         raise
 
 
-async def safe_send_or_edit(callback, text, parse_mode="HTML", reply_markup=None):
-    """Безопасно отправляет или редактирует сообщение"""
-    try:
-        await safe_edit_text(callback.message, text, parse_mode=parse_mode, reply_markup=reply_markup)
-    except TelegramBadRequest:
-        # Если не получилось отредактировать, отправляем новое сообщение
-        await callback.message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
-
-
 @router.callback_query(F.data == "profile")
-async def handle_profile(callback: CallbackQuery, state: FSMContext, account_id: str | None = None) -> None:
+async def handle_profile(callback: CallbackQuery, state: FSMContext) -> None:
     tg_id = callback.from_user.id
     try:
         if account_id is None:
@@ -68,47 +42,25 @@ async def handle_profile(callback: CallbackQuery, state: FSMContext, account_id:
                 return
             account_id = user_data["steam_id32"]
 
-        stats_data = await opendota_client.get_formatted_player_stats(account_id)
+        steam_id32 = user_data["steam_id32"]
+        stats_data = await opendota_client.get_formatted_player_stats(steam_id32)
 
-        full_text = Text(
-            Bold("📊 Статистика игрока"),
-            "\n\n",
-            Bold("🆔 Steam ID:"),
-            " ",
-            Code(account_id),
-            "\n\n",
-            stats_data["text"],
-        )
+        full_text = Text(Bold("📊 Твоя статистика Dota 2"), "\n\n", stats_data["text"])
 
-        await state.set_state(NavigationStates.viewing_profile)
-        await state.update_data(account_id=account_id)
-
-        reply_markup = None
-        if stats_data.get("profile_found"):
-            reply_markup = player_menu(account_id)
-
-        if stats_data["avatar_url"] and getattr(callback.message, "photo", None):
-            await safe_edit_text(
-                callback.message,
-                full_text.as_html(),
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
-        elif stats_data["avatar_url"]:
+        if stats_data["avatar_url"]:
             await callback.message.answer_photo(
                 photo=stats_data["avatar_url"],
                 caption=full_text.as_html(),
                 parse_mode="HTML",
-                reply_markup=reply_markup,
             )
         else:
-            await safe_send_or_edit(
-                callback,
+            await callback.message.answer(
                 full_text.as_html(),
                 parse_mode="HTML",
-                reply_markup=reply_markup,
             )
-
+        
+        await state.set_state(NavigationStates.viewing_profile)
+        await state.update_data(account_id=steam_id32)
         await callback.answer()
 
     except Exception as e:
@@ -130,10 +82,8 @@ async def handle_matches(callback: CallbackQuery, state: FSMContext) -> None:
         # Проверить доступность профиля
         profile = await opendota_client.get_player_profile(steam_id32)
         if not profile:
-            await safe_send_or_edit(
-                callback,
-                "🚷 Профиль скрыт. Матчи недоступны.",
-                reply_markup=back_button()
+            await callback.message.answer(
+                "🚷 Профиль скрыт. Матчи недоступны."
             )
             await callback.answer()
             return
@@ -159,9 +109,9 @@ async def handle_matches(callback: CallbackQuery, state: FSMContext) -> None:
 
         await state.set_data({"current_page": 0, "has_next": len(matches) > 5, "account_id": steam_id32})
         await state.set_state(NavigationStates.viewing_matches)
+        await state.update_data(account_id=steam_id32)
 
-        await safe_send_or_edit(
-            callback,
+        await callback.message.answer(
             matches_text,
             parse_mode="HTML",
             reply_markup=matches_navigation(0, len(matches) > 5),
@@ -257,8 +207,7 @@ async def handle_heroes(callback: CallbackQuery) -> None:
                 f"   📈 Винрейт: {winrate:.1f}%\n\n",
             )
 
-        await safe_send_or_edit(
-            callback,
+        await callback.message.answer(
             heroes_text.as_html(),
             parse_mode="HTML",
             reply_markup=back_button(),
@@ -350,48 +299,196 @@ async def handle_confirm_action(callback: CallbackQuery, state: FSMContext) -> N
 @router.callback_query(F.data == "cancel")
 async def handle_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await handle_profile(callback, state)
+    await callback.message.edit_text(
+        "❌ Действие отменено.",
+        parse_mode="HTML",
+        reply_markup=main_menu(),
+    )
+    await callback.answer()
 
 
-
-
-@router.callback_query(F.data == "back_to_match")
-async def handle_back_to_match(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data == "back_to_last")
+async def handle_back_to_last(callback: CallbackQuery, state: FSMContext) -> None:
+    current_state = await state.get_state()
     data = await state.get_data()
-    match_id = data.get("match_id")
-    if not match_id:
-        await callback.answer("❌ Не удалось вернуться к матчу.", show_alert=True)
-        return
-
-    try:
-        session = await opendota_client.get_session()
-        async with session.get(f"https://api.opendota.com/api/matches/{match_id}") as response:
-            if response.status != 200:
-                await callback.answer("❌ Не удалось загрузить матч.", show_alert=True)
-                return
-            match_data = await response.json()
-
-        match_text = format_match_details(match_data)
-        await safe_send_or_edit(
-            callback,
-            match_text.as_html(),
-            parse_mode="HTML",
-            reply_markup=match_menu(str(match_id)),
-        )
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Ошибка возврата к матчу {match_id}: {e}")
-        await callback.answer("❌ Ошибка при возврате к матчу.", show_alert=True)
-
-
-@router.callback_query(F.data == "back_to_profile")
-async def handle_back_to_profile(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    account_id = data.get("account_id")
-    if account_id:
-        await handle_profile(callback, state, account_id=account_id)
+    
+    if current_state == NavigationStates.viewing_profile:
+        account_id = data.get("account_id")
+        if account_id:
+            # Показать профиль
+            stats_data = await opendota_client.get_formatted_player_stats(account_id)
+            full_text = Text(Bold("📊 Статистика игрока"), "\n", f"🆔 Steam ID32: {account_id}\n\n", stats_data["text"])
+            if stats_data["avatar_url"]:
+                await callback.message.answer_photo(
+                    photo=stats_data["avatar_url"],
+                    caption=full_text.as_html(),
+                    parse_mode="HTML",
+                    reply_markup=player_menu(account_id)
+                )
+            else:
+                await callback.message.answer(
+                    full_text.as_html(),
+                    parse_mode="HTML",
+                    reply_markup=player_menu(account_id)
+                )
+        else:
+            await callback.message.edit_text(
+                Text(Bold("🎮 Главное меню:")).as_html(),
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
+    elif current_state == NavigationStates.viewing_matches:
+        account_id = data.get("account_id")
+        if account_id:
+            # Показать матчи
+            profile = await opendota_client.get_player_profile(account_id)
+            if not profile:
+                await callback.message.answer("🚷 Профиль скрыт. Матчи недоступны.")
+            else:
+                matches = await opendota_client.get_recent_matches(account_id, limit=5)
+                if not matches:
+                    await callback.message.answer("📭 Матчи недоступны.")
+                else:
+                    matches_text = "<b>⚔️ Последние матчи:</b>\n\n"
+                    from app.utils.formatters import format_match_result
+                    for i, match in enumerate(matches[:5], 1):
+                        match_text = format_match_result(match)
+                        matches_text += f"{i}. {match_text}\n\n"
+                    await callback.message.answer(
+                        matches_text,
+                        parse_mode="HTML",
+                        reply_markup=back_button(),
+                    )
+        else:
+            await callback.message.edit_text(
+                Text(Bold("🎮 Главное меню:")).as_html(),
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
+    elif current_state == NavigationStates.viewing_match:
+        match_id = data.get("match_id")
+        if match_id:
+            # Показать матч
+            session = await opendota_client.get_session()
+            async with session.get(f"https://api.opendota.com/api/matches/{match_id}") as response:
+                if response.status == 200:
+                    match_data = await response.json()
+                    match_text = format_match_details(match_data)
+                    match_html = match_text.as_html() if hasattr(match_text, "as_html") else str(match_text)
+                    await callback.message.answer(
+                        match_html,
+                        parse_mode="HTML",
+                        reply_markup=match_menu(str(match_id))
+                    )
+                else:
+                    await callback.message.answer("❌ Матч не найден.")
+        else:
+            await safe_edit_text(
+                callback.message,
+                Text(Bold("🎮 Главное меню:")).as_html(),
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
     else:
-        await handle_profile(callback, state)
+        await safe_edit_text(
+            callback.message,
+            Text(Bold("🎮 Главное меню:")).as_html(),
+            parse_mode="HTML",
+            reply_markup=main_menu(),
+        )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_main")
+async def handle_back_to_main(callback: CallbackQuery, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    data = await state.get_data()
+    
+    if current_state == NavigationStates.viewing_profile:
+        account_id = data.get("account_id")
+        if account_id:
+            # Показать профиль
+            stats_data = await opendota_client.get_formatted_player_stats(account_id)
+            full_text = Text(Bold("📊 Статистика игрока"), "\n", f"🆔 Steam ID32: {account_id}\n\n", stats_data["text"])
+            if stats_data["avatar_url"]:
+                await callback.message.answer_photo(
+                    photo=stats_data["avatar_url"],
+                    caption=full_text.as_html(),
+                    parse_mode="HTML",
+                    reply_markup=player_menu(account_id)
+                )
+            else:
+                await callback.message.answer(
+                    full_text.as_html(),
+                    parse_mode="HTML",
+                    reply_markup=player_menu(account_id)
+                )
+        else:
+            await callback.message.edit_text(
+                Text(Bold("🎮 Главное меню:")).as_html(),
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
+    elif current_state == NavigationStates.viewing_matches:
+        account_id = data.get("account_id")
+        if account_id:
+            # Показать матчи
+            profile = await opendota_client.get_player_profile(account_id)
+            if not profile:
+                await callback.message.answer("🚷 Профиль скрыт. Матчи недоступны.")
+            else:
+                matches = await opendota_client.get_recent_matches(account_id, limit=5)
+                if not matches:
+                    await callback.message.answer("📭 Матчи недоступны.")
+                else:
+                    matches_text = "<b>⚔️ Последние матчи:</b>\n\n"
+                    from app.utils.formatters import format_match_result
+                    for i, match in enumerate(matches[:5], 1):
+                        match_text = format_match_result(match)
+                        matches_text += f"{i}. {match_text}\n\n"
+                    await callback.message.answer(
+                        matches_text,
+                        parse_mode="HTML",
+                        reply_markup=back_button(),
+                    )
+        else:
+            await callback.message.edit_text(
+                Text(Bold("🎮 Главное меню:")).as_html(),
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
+    elif current_state == NavigationStates.viewing_match:
+        match_id = data.get("match_id")
+        if match_id:
+            # Показать матч
+            session = await opendota_client.get_session()
+            async with session.get(f"https://api.opendota.com/api/matches/{match_id}") as response:
+                if response.status == 200:
+                    match_data = await response.json()
+                    match_text = format_match_details(match_data)
+                    match_html = match_text.as_html() if hasattr(match_text, "as_html") else str(match_text)
+                    await callback.message.answer(
+                        match_html,
+                        parse_mode="HTML",
+                        reply_markup=match_menu(str(match_id))
+                    )
+                else:
+                    await callback.message.answer("❌ Матч не найден.")
+        else:
+            await callback.message.edit_text(
+                Text(Bold("🎮 Главное меню:")).as_html(),
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
+    else:
+        await callback.message.edit_text(
+            Text(Bold("🎮 Главное меню:")).as_html(),
+            parse_mode="HTML",
+            reply_markup=main_menu(),
+        )
+    
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("player_matches_"))
@@ -401,25 +498,23 @@ async def handle_player_matches(callback: CallbackQuery) -> None:
         recent_matches = await opendota_client.get_recent_matches(account_id, limit=5)
 
         if not recent_matches:
-            await safe_send_or_edit(
-                callback,
+            await callback.message.answer(
                 "❌ Не удалось загрузить последние матчи.",
                 reply_markup=back_button(),
             )
             await callback.answer()
             return
 
-        matches_text = "<b>⚔️ Последние матчи игрока:</b>\n\n"
+        matches_text = Text(Bold("⚔️ Последние матчи игрока:"), "\n\n")
 
         from app.utils.formatters import format_match_result
 
-        for i, match in enumerate(recent_matches, 1):
+        for match in recent_matches:
             match_text = format_match_result(match)
-            matches_text += f"{i}. {match_text}\n\n"
+            matches_text += match_text + "\n\n"
 
-        await safe_send_or_edit(
-            callback,
-            matches_text,
+        await callback.message.answer(
+            matches_text.as_html(),
             parse_mode="HTML",
             reply_markup=back_button(),
         )
@@ -437,8 +532,7 @@ async def handle_player_heroes(callback: CallbackQuery) -> None:
         heroes_stats = await opendota_client.get_player_heroes(account_id)
 
         if not heroes_stats:
-            await safe_send_or_edit(
-                callback,
+            await callback.message.answer(
                 "❌ Не удалось загрузить статистику героев.",
                 reply_markup=back_button(),
             )
@@ -465,8 +559,7 @@ async def handle_player_heroes(callback: CallbackQuery) -> None:
                 f"   📈 Винрейт: {winrate:.1f}%\n\n",
             )
 
-        await safe_send_or_edit(
-            callback,
+        await callback.message.answer(
             heroes_text.as_html(),
             parse_mode="HTML",
             reply_markup=back_button(),
@@ -491,7 +584,7 @@ async def handle_match_items_radiant(callback: CallbackQuery, state: FSMContext)
 
                 items_text = Text(Bold("📦 Предметы Radiant команды:"), "\n\n")
 
-                from app.utils.formatters import format_player_items, get_hero_name
+                from app.utils.formatters import get_hero_name, format_player_items
 
                 for player in radiant_players:
                     hero_id = player.get("hero_id", 0)
@@ -499,18 +592,13 @@ async def handle_match_items_radiant(callback: CallbackQuery, state: FSMContext)
                     items = await format_player_items(player)
                     items_text += Text(f"🦸 {hero_name}\n{items}\n\n")
 
-                await safe_send_or_edit(
-                    callback,
+                await callback.message.answer(
                     items_text.as_html(),
                     parse_mode="HTML",
-                    reply_markup=back_button("back_to_match"),
+                    reply_markup=back_button(),
                 )
             else:
-                await safe_send_or_edit(
-                    callback,
-                    "❌ Ошибка загрузки данных матча.",
-                    reply_markup=back_button("back_to_match")
-                )
+                await callback.message.answer("❌ Ошибка загрузки данных матча.", reply_markup=back_button())
         
         await state.set_state(NavigationStates.viewing_match)
         await state.update_data(match_id=match_id)
@@ -533,7 +621,7 @@ async def handle_match_items_dire(callback: CallbackQuery, state: FSMContext) ->
 
                 items_text = Text(Bold("📦 Предметы Dire команды:"), "\n\n")
 
-                from app.utils.formatters import format_player_items, get_hero_name
+                from app.utils.formatters import get_hero_name, format_player_items
 
                 for player in dire_players:
                     hero_id = player.get("hero_id", 0)
@@ -541,18 +629,13 @@ async def handle_match_items_dire(callback: CallbackQuery, state: FSMContext) ->
                     items = await format_player_items(player)
                     items_text += Text(f"🦸 {hero_name}\n{items}\n\n")
 
-                await safe_send_or_edit(
-                    callback,
+                await callback.message.answer(
                     items_text.as_html(),
                     parse_mode="HTML",
-                    reply_markup=back_button("back_to_match"),
+                    reply_markup=back_button(),
                 )
             else:
-                await safe_send_or_edit(
-                    callback,
-                    "❌ Ошибка загрузки данных матча.",
-                    reply_markup=back_button("back_to_match")
-                )
+                await callback.message.answer("❌ Ошибка загрузки данных матча.", reply_markup=back_button())
         
         await state.set_state(NavigationStates.viewing_match)
         await state.update_data(match_id=match_id)

@@ -1,11 +1,11 @@
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
-from aiogram.utils.formatting import Bold, Code, Text
+from aiogram.types import InputMediaPhoto, Message
+from aiogram.utils.formatting import Bold, Text
 
 from app.database.db import db
-from app.keyboards.user import match_menu, player_menu, settings_menu
+from app.keyboards.user import main_menu, match_menu, player_menu
 from app.services.opendota import opendota_client
 from app.states.user import RegistrationStates, SettingsStates, NavigationStates
 from app.utils.formatters import format_match_details
@@ -52,7 +52,7 @@ async def render_profile_message(message: Message, steam_id32: str, show_back: b
 
 
 @router.message(Command("match"))
-async def handle_match_command(message: Message, state: FSMContext) -> None:
+async def handle_match_command(message: Message) -> None:
     match_id = message.text.split()[1] if len(message.text.split()) > 1 else None
 
     if not match_id:
@@ -114,8 +114,8 @@ async def handle_match_command(message: Message, state: FSMContext) -> None:
 
 
 @router.message(Command("player"))
-async def handle_player_command(message: Message, state: FSMContext) -> None:
-    account_input = message.text.split()[1] if len(message.text.split()) > 1 else None
+async def handle_player_command(message: Message) -> None:
+    account_id = message.text.split()[1] if len(message.text.split()) > 1 else None
 
     if not account_input:
         await message.answer(
@@ -127,56 +127,7 @@ async def handle_player_command(message: Message, state: FSMContext) -> None:
         )
         return
 
-    account_id = None
-    if account_input.startswith("http"):
-        steam_query = extract_steam_id_from_url(account_input)
-        if not steam_query:
-            await message.answer(
-                "❌ Неверная ссылка на профиль Steam.\n"
-                "Используй ссылку вида https://steamcommunity.com/profiles/<id> или https://steamcommunity.com/id/<vanity>."
-            )
-            return
-
-        if steam_query.isdigit():
-            account_id = steam_query
-            if len(account_id) >= 17:
-                try:
-                    account_id = steam64_to_steam32(account_id)
-                except ValueError:
-                    await message.answer(
-                        "❌ Ошибка конвертации Steam ID64.\n\n"
-                        "Проверь правильность ID и попробуй снова."
-                    )
-                    return
-        else:
-            steam_id64 = await resolve_vanity_url(steam_query)
-            if not steam_id64:
-                await message.answer(
-                    "❌ Не удалось разрешить vanity-ссылку Steam.\n"
-                    "Проверь ссылку или используй прямой Steam ID."
-                )
-                return
-            try:
-                account_id = steam64_to_steam32(steam_id64)
-            except ValueError:
-                await message.answer(
-                    "❌ Ошибка конвертации Steam ID64.\n\n"
-                    "Проверь правильность ID и попробуй снова."
-                )
-                return
-    else:
-        account_id = account_input
-        if account_id.isdigit() and len(account_id) >= 17:
-            try:
-                account_id = steam64_to_steam32(account_id)
-            except ValueError:
-                await message.answer(
-                    "❌ Ошибка конвертации Steam ID64.\n\n"
-                    "Проверь правильность ID и попробуй снова."
-                )
-                return
-
-    if not account_id or not validate_steam_id(account_id):
+    if not validate_steam_id(account_id):
         await message.answer(
             "❌ Неверный формат ID аккаунта.\n\n"
             "📝 <b>Примеры:</b>\n"
@@ -185,6 +136,16 @@ async def handle_player_command(message: Message, state: FSMContext) -> None:
             parse_mode="HTML",
         )
         return
+
+    if len(account_id) >= 17:
+        try:
+            account_id = steam64_to_steam32(account_id)
+        except ValueError:
+            await message.answer(
+                "❌ Ошибка конвертации Steam ID64.\n\n"
+                "Проверь правильность ID и попробуй снова."
+            )
+            return
 
     loading_msg = await message.answer("🔄 Загружаю статистику игрока...")
 
@@ -214,22 +175,18 @@ async def handle_player_command(message: Message, state: FSMContext) -> None:
                 stats_data["text"],
             )
 
-            reply_markup = None
-            if stats_data.get("profile_found"):
-                reply_markup = player_menu(account_id, show_back=True)
-
             if stats_data["avatar_url"]:
                 await message.answer_photo(
                     photo=stats_data["avatar_url"],
                     caption=full_text.as_html(),
                     parse_mode="HTML",
-                    reply_markup=reply_markup
+                    reply_markup=player_menu(account_id)
                 )
             else:
                 await message.answer(
                     full_text.as_html(), 
                     parse_mode="HTML",
-                    reply_markup=reply_markup
+                    reply_markup=player_menu(account_id)
                 )
 
     except Exception as e:

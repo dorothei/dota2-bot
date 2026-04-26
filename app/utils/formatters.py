@@ -4,6 +4,7 @@ import html
 from aiogram.utils.formatting import Bold, Code, Text
 from app.services.opendota import opendota_client
 from config.logger import logger
+from app.services.opendota import opendota_client
 
 HERO_NAMES: Final[dict[int, str]] = {
     1: "Anti-Mage 🔮",
@@ -323,23 +324,22 @@ def format_match_details(match_data: dict[str, Any]) -> Text:
         logger.error(f"Ошибка форматирования матча: {e}")
         return Text("❌ Ошибка форматирования данных матча")
 
-
 def get_item_name(item_id: int) -> str:
     if item_id == 0:
-        return "Empty Slot"
-    return f"Unknown Item {item_id}"
+        return "Empty Slot ❌"
+    return ITEM_NAMES.get(item_id, f"Unknown Item {item_id}")
 
 
 async def get_item_name_async(item_id: int) -> str:
     if item_id == 0:
-        return "Empty Slot"
+        return ITEM_NAMES.get(0, "Empty Slot ❌")
 
     if not opendota_client.items_dict:
         opendota_client.items_dict = await opendota_client.get_items_dict()
 
     name = opendota_client.items_dict.get(item_id)
     if name:
-        return name
+        return ITEM_NAMES.get(item_id, name)
 
     # Если предмета нет в текущем кеше, попробуем обновить словарь
     refreshed = await opendota_client.get_items_dict()
@@ -347,34 +347,29 @@ async def get_item_name_async(item_id: int) -> str:
         opendota_client.items_dict = refreshed
         name = refreshed.get(item_id)
         if name:
-            return name
+            return ITEM_NAMES.get(item_id, name)
 
-    return f"Unknown Item {item_id}"
+    return ITEM_NAMES.get(item_id, f"Unknown Item {item_id}")
 
 
 async def format_player_items(player: dict) -> str:
-    # Инвентарь
-    inventory_items = []
+    items = []
     for i in range(6):
         item_id = player.get(f"item_{i}", 0)
-        item_name = await get_item_name_async(item_id)
-        inventory_items.append(item_name)
-
-    # Рюкзак
-    backpack_items = []
+        items.append(await get_item_name_async(item_id))
+    
+    backpack = []
     for i in range(3):
         item_id = player.get(f"backpack_{i}", 0)
-        item_name = await get_item_name_async(item_id)
-        backpack_items.append(item_name)
-
-    # Нейтральный предмет
-    neutral_item_id = player.get("item_neutral", 0)
-    neutral_item_name = await get_item_name_async(neutral_item_id)
-
+        backpack.append(await get_item_name_async(item_id))
+    
+    neutral = player.get("item_neutral", 0)
+    neutral_name = await get_item_name_async(neutral) if neutral else "Нет"
+    
     return (
-        f"🪄 Инвентарь: {', '.join(inventory_items)}\n"
-        f"🎒 Рюкзак: {', '.join(backpack_items)}\n"
-        f"🧿 Нейтральный предмет: {neutral_item_name}"
+        f"📦 Инвентарь: {', '.join(items)}\n"
+        f"🎒 Рюкзак: {', '.join(backpack)}\n"
+        f"🧿 Нейтральный предмет: {neutral_name}"
     )
 
 
@@ -400,13 +395,13 @@ def format_match_result(match: dict) -> str:
         duration_text = format_duration(duration)
 
         hero_name = get_hero_name(hero_id)
-
-        match_text = Text(
-            f"{result_emoji} {result_text}\n",
-            "ID: ", Code(str(match_id)), "\n",
-            f"Герой: {hero_name}\n",
-            f"KDA: {kda_text}\n",
-            f"Длительность: {duration_text}",
+        
+        return (
+            f"{result_emoji} {result_text}\n"
+            f"🆔 ID: <code>{match_id}</code>\n"
+            f"🦸 Герой: {hero_name}\n"
+            f"⚔️ KDA: {kda_text}\n"
+            f"⏱️ Длительность: {duration_text}"
         )
 
         return match_text.as_html()

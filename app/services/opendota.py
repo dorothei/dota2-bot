@@ -56,7 +56,7 @@ class OpenDotaClient:
             )
             
             if isinstance(profile_data, Exception) or not profile_data:
-                return {"text": Text("🚷 Профиль не найден или скрыт."), "avatar_url": None, "profile_found": False}
+                return {"text": Text("🚷 Профиль не найден или скрыт."), "avatar_url": None}
             
             profile = profile_data.get("profile")
             if not profile:
@@ -79,12 +79,11 @@ class OpenDotaClient:
                     Bold("❌ Поражений:"), f" {losses}\n",
                     Bold("📈 Винрейт:"), f" {format_winrate(wins, losses)}"
                 ),
-                "avatar_url": avatar_url,
-                "profile_found": True,
+                "avatar_url": avatar_url
             }
         except Exception as e:
             logger.error(f"Ошибка статистики: {e}")
-            return {"text": Text("❌ Ошибка при получении данных."), "avatar_url": None, "profile_found": False}
+            return {"text": Text("❌ Ошибка при получении данных."), "avatar_url": None}
 
     async def get_items_dict(self) -> dict[int, str]:
         data = await self._make_request("https://api.opendota.com/api/constants/items")

@@ -6,6 +6,16 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
+def main_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.row(InlineKeyboardButton(text="📊 Мой профиль", callback_data="profile"))
+    builder.row(InlineKeyboardButton(text="⚔️ Последние матчи", callback_data="matches"))
+    builder.row(InlineKeyboardButton(text="⭐ Любимые герои", callback_data="heroes"))
+    builder.row(InlineKeyboardButton(text="🔄 Вернуться к последнему", callback_data="back_to_last"))
+    builder.row(InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings"))
+
+    return builder.as_markup()
 
 
 def settings_menu() -> InlineKeyboardMarkup:
@@ -60,7 +70,7 @@ def confirm_action(action: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def back_button(callback_data: str = "back_to_profile") -> InlineKeyboardMarkup:
+def back_button() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data=callback_data))
@@ -85,6 +95,24 @@ def match_menu(match_id: str) -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="📦 Предметы Radiant", callback_data=f"match_items_radiant_{match_id}"))
     builder.row(InlineKeyboardButton(text="📦 Предметы Dire", callback_data=f"match_items_dire_{match_id}"))
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_profile"))
+
+    return builder.as_markup()
+
+
+def player_menu(account_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.row(InlineKeyboardButton(text="⚔️ Последние матчи", callback_data=f"player_matches_{account_id}"))
+    builder.row(InlineKeyboardButton(text="⭐ Любимые герои", callback_data=f"player_heroes_{account_id}"))
+
+    return builder.as_markup()
+
+
+def match_menu(match_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.row(InlineKeyboardButton(text="📦 Предметы Radiant", callback_data=f"match_items_radiant_{match_id}"))
+    builder.row(InlineKeyboardButton(text="📦 Предметы Dire", callback_data=f"match_items_dire_{match_id}"))
 
     return builder.as_markup()
 
