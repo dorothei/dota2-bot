@@ -11,7 +11,6 @@ class Database:
         self._connection: aiosqlite.Connection | None = None
 
     async def connect(self) -> None:
-        """Установка соединения с базой данных."""
         try:
             self._connection = await aiosqlite.connect(self.database_url)
             await self._create_tables()
